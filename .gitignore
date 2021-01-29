@@ -1,0 +1,4 @@
+build/
+dist/
+archivy_static_site_gen.egg-info/
+archivy_static_site_gen/__pycache__/
