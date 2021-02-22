@@ -9,7 +9,7 @@ with open('requirements.txt', encoding='utf-8') as f:
 
 setup(
     name='archivy_static_site_gen',
-    version='0.1.0',
+    version='0.1.1',
     author="Uzay-G",
     author_email="halcyon@disroot.org",
     description=(
