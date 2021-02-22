@@ -101,7 +101,7 @@ def build(overwrite):
             return
         items = filter(display_post, get_items(structured=False))
         for post in items:
-            (dataobj_dir / str(post["id"])).mkdir()
+            (dataobj_dir / str(post["id"])).mkdir(exist_ok=True)
             with (dataobj_dir / str(post["id"]) / "index.html").open("w") as f:
                 f.write(
                     process_render(
