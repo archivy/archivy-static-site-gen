@@ -20,19 +20,22 @@ class LoggedInUser(UserMixin):
     is_authenticated = True
 
 
-def process_render(route, **kwargs):
+def process_render(route, name, **kwargs):
     """Processes template render by wrapping with some defaults"""
     resp = render_template(route, current_user=LoggedInUser(), view_only=1, **kwargs)
+    if name:
+        # TODO: fix this because there can be a problem if the user
+        # has an h3 with Archivy in one of their notes (using bs4 for this is not an option because it's much slower)
+        resp = resp.replace("<h3>Archivy</h3>", f"<h3>{name}</h3>")
     return resp.replace("?path=", "dirs/")
 
 
 def gen_dir_page(
-    directory: Directory, output_path: Path, parent_dir: Path, dataobj_tree
+    directory: Directory, output_path: Path, parent_dir: Path, dataobj_tree, wiki_name
 ):
     """Generates directory listing page recursively."""
     new_dir_path = output_path / parent_dir / directory.name
     new_dir_path.mkdir()
-
 
     with (new_dir_path / "index.html").open("w") as f:
         parent_path = str(parent_dir.relative_to(output_path))
@@ -41,6 +44,7 @@ def gen_dir_page(
         f.write(
             process_render(
                 "home.html",
+                name=wiki_name,
                 dir=directory,
                 title=f"{parent_path}{directory.name}",
                 current_path=f"{parent_path}/{directory.name}/",
@@ -51,7 +55,7 @@ def gen_dir_page(
         )
 
     for child_dir in directory.child_dirs.values():
-        gen_dir_page(child_dir, output_path, new_dir_path, dataobj_tree)
+        gen_dir_page(child_dir, output_path, new_dir_path, dataobj_tree, wiki_name)
 
 
 def strip_hidden_data(directory: Directory):
@@ -63,7 +67,9 @@ def strip_hidden_data(directory: Directory):
             directory.child_dirs.pop(subdir)
         else:
             directory.child_dirs[subdir] = stripped_subdir
-    if directory.child_files or directory.child_dirs: # only display directories that have data.
+    if (
+        directory.child_files or directory.child_dirs
+    ):  # only display directories that have data.
         return directory
     return None
 
@@ -78,8 +84,13 @@ def static_site():
 @click.option(
     "--overwrite", help="Overwrite _site/ output directory if it exists", is_flag=True
 )
-@click.option("--wiki_desc", type=click.Path(exists=True), help="Pass an (optional) HTML file of which the contents will be displayed at the top of the homepage of the wiki, acting as a description.")
-def build(overwrite, wiki_desc):
+@click.option(
+    "--wiki_desc",
+    type=click.Path(exists=True),
+    help="Pass an (optional) HTML file of which the contents will be displayed at the top of the homepage of the wiki, acting as a description.",
+)
+@click.option("--wiki_name", type=str, help="Name of your wiki")
+def build(overwrite, wiki_desc, wiki_name):
     """Builds a _site/ directory with HTML generated from archivy markdown."""
     output_path = Path().absolute() / "_site"
     if output_path.exists():
@@ -108,6 +119,7 @@ def build(overwrite, wiki_desc):
                 f.write(
                     process_render(
                         "dataobjs/show.html",
+                        name=wiki_name,
                         dataobj=post,
                         form=DeleteDataForm(),
                         current_path=post["fullpath"],
@@ -119,26 +131,35 @@ def build(overwrite, wiki_desc):
         with (output_path / "index.html").open("w") as f:
             home_dir_page = process_render(
                 "home.html",
+                name=wiki_name,
                 new_folder_form=NewFolderForm(),
                 delete_form=DeleteFolderForm(),
                 dir=dataobj_tree,
                 dataobjs=dataobj_tree,
                 title="Home",
             )
+            info_message = """
+                <p><small>Powered by <a href="https://archivy.github.io" target="_blank">Archivy</a> and its <a href="https://github.com/archivy/archivy-static-site-gen">static site generator</a>.</small></p>
+            """
+            modified_home = BeautifulSoup(home_dir_page, features="html.parser")
             if wiki_desc:
-                modified_home = BeautifulSoup(home_dir_page, features="html.parser")
                 with open(wiki_desc, "r") as desc:
-                    inserted_html = BeautifulSoup(desc.read(), features="html.parser")
-                modified_home.select_one("#files").insert_before(inserted_html)
-                f.write(str(modified_home))
-            else: f.write(home_dir_page)
+                    inserted_html = BeautifulSoup(
+                        desc.read() + info_message, features="html.parser"
+                    )
+            else:
+                inserted_html = BeautifulSoup(info_message, features="html.parser")
+            modified_home.select_one("#files").insert_before(inserted_html)
+            f.write(str(modified_home))
 
         directories_dir = output_path / "dirs"
         directories_dir.mkdir()
         with (directories_dir / "index.html").open("w") as f:
             f.write(home_dir_page)
         for child_dir in dataobj_tree.child_dirs.values():
-            gen_dir_page(child_dir, directories_dir, directories_dir, dataobj_tree)
+            gen_dir_page(
+                child_dir, directories_dir, directories_dir, dataobj_tree, wiki_name
+            )
 
 
 @static_site.command()
