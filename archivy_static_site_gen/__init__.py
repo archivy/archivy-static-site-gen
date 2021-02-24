@@ -2,6 +2,7 @@ from pathlib import Path
 from shutil import rmtree, copytree
 from sys import exit
 
+from bs4 import BeautifulSoup
 import click
 import frontmatter
 from flask import render_template
@@ -77,7 +78,8 @@ def static_site():
 @click.option(
     "--overwrite", help="Overwrite _site/ output directory if it exists", is_flag=True
 )
-def build(overwrite):
+@click.option("--wiki_desc", type=click.Path(exists=True), help="Pass an (optional) HTML file of which the contents will be displayed at the top of the homepage of the wiki, acting as a description.")
+def build(overwrite, wiki_desc):
     """Builds a _site/ directory with HTML generated from archivy markdown."""
     output_path = Path().absolute() / "_site"
     if output_path.exists():
@@ -123,7 +125,13 @@ def build(overwrite):
                 dataobjs=dataobj_tree,
                 title="Home",
             )
-            f.write(home_dir_page)
+            if wiki_desc:
+                modified_home = BeautifulSoup(home_dir_page, features="html.parser")
+                with open(wiki_desc, "r") as desc:
+                    inserted_html = BeautifulSoup(desc.read(), features="html.parser")
+                modified_home.select_one("#files").insert_before(inserted_html)
+                f.write(str(modified_home))
+            else: f.write(home_dir_page)
 
         directories_dir = output_path / "dirs"
         directories_dir.mkdir()
