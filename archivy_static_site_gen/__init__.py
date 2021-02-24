@@ -1,3 +1,4 @@
+from json import dumps
 from pathlib import Path
 from shutil import rmtree, copytree
 from sys import exit
@@ -12,6 +13,50 @@ from archivy import app
 from archivy.data import get_item, get_items, Directory, get_data_dir
 from archivy.forms import DeleteDataForm, NewFolderForm, DeleteFolderForm
 
+SEARCH_HTML = """
+    <input type="text" id="searchBar" placeholder="Search wiki">
+    <ul id="searchHits"> </ul>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lunr@2.3.8/lunr.min.js"></script>
+    <script>
+        let index, titles;
+        async function loadIndexAndTitles() {
+            let fetchIndex = await fetch("/search-index.json", { headers: { "content-type": "application/json"}});
+
+            if (fetchIndex.ok)
+            {
+                let unparsedIndex = await fetchIndex.json();
+                index = lunr.Index.load(unparsedIndex);
+            }
+            let fetchTitles = await fetch("/titles.json", { headers: { "content-type": "application/json"}});
+            if (fetchTitles)
+            {
+                titles = await fetchTitles.json();
+            }
+        }
+
+        function appendHit(hit, hitsDiv)
+        {
+            if (hit["score"] > 2.5)
+            {
+                let hitLi = document.createElement("li"); 
+                let a = document.createElement("a");
+                a.href = `/dataobj/${hit["ref"]}`;
+                a.textContent = titles[hit["ref"]];
+                hitLi.append(a);
+                hitsDiv.append(hitLi);
+            }
+        }
+
+        window.onload = loadIndexAndTitles();
+        let input = document.getElementById("searchBar");
+        let hitsDiv = document.getElementById("searchHits");
+        input.addEventListener("input", async function(e) {
+            hitsDiv.innerHTML = ""; 
+            index.search(input.value).slice(0, 5).map((hit) => appendHit(hit, hitsDiv));
+        })
+
+    </script>
+"""
 
 display_post = lambda post: "omit" not in post.metadata or not post["omit"]
 
@@ -28,6 +73,29 @@ def process_render(route, name, **kwargs):
         # has an h3 with Archivy in one of their notes (using bs4 for this is not an option because it's much slower)
         resp = resp.replace("<h3>Archivy</h3>", f"<h3>{name}</h3>")
     return resp.replace("?path=", "dirs/")
+
+
+def create_lunr_index(documents):
+    """Creates and configures a search index for the wiki."""
+    from lunr.builder import Builder
+    from lunr.stemmer import stemmer
+    from lunr.trimmer import trimmer
+    from lunr.stop_word_filter import stop_word_filter
+
+    builder = Builder()
+    builder.pipeline.add(trimmer, stop_word_filter, stemmer)
+    builder.search_pipeline.add(stemmer)
+    builder.metadata_whitelist = ["position"]
+    builder.ref("id")
+    fields = [
+        {"field_name": "title", "boost": 10},
+        {"field_name": "body", "extractor": lambda doc: doc.content},
+    ]
+    for field in fields:
+        builder.field(**field)
+    for document in documents:
+        builder.add(document)
+    return builder.build()
 
 
 def gen_dir_page(
@@ -112,8 +180,15 @@ def build(overwrite, wiki_desc, wiki_name):
         if not dataobj_tree:
             click.echo("No data found.")
             return
-        items = filter(display_post, get_items(structured=False))
+        items = list(filter(display_post, get_items(structured=False)))
+        index = create_lunr_index(items)
+        with (output_path / "search-index.json").open("w") as f:
+            f.write(dumps(index.serialize()))
+        # we need to store an association between id -> title, because the search engine only returns the id
+        # without the title of the item
+        titles = {}
         for post in items:
+            titles[post["id"]] = post["title"]
             (dataobj_dir / str(post["id"])).mkdir(exist_ok=True)
             with (dataobj_dir / str(post["id"]) / "index.html").open("w") as f:
                 f.write(
@@ -128,6 +203,8 @@ def build(overwrite, wiki_desc, wiki_name):
                     )
                 )
 
+        with open(output_path / "titles.json", "w") as f:
+            f.write(dumps(titles))
         with (output_path / "index.html").open("w") as f:
             home_dir_page = process_render(
                 "home.html",
@@ -138,17 +215,17 @@ def build(overwrite, wiki_desc, wiki_name):
                 dataobjs=dataobj_tree,
                 title="Home",
             )
-            info_message = """
+            customization = (
+                """
                 <p><small>Powered by <a href="https://archivy.github.io" target="_blank">Archivy</a> and its <a href="https://github.com/archivy/archivy-static-site-gen">static site generator</a>.</small></p>
             """
+                + SEARCH_HTML
+            )
             modified_home = BeautifulSoup(home_dir_page, features="html.parser")
             if wiki_desc:
                 with open(wiki_desc, "r") as desc:
-                    inserted_html = BeautifulSoup(
-                        desc.read() + info_message, features="html.parser"
-                    )
-            else:
-                inserted_html = BeautifulSoup(info_message, features="html.parser")
+                    customization = desc.read() + customization
+            inserted_html = BeautifulSoup(customization, features="html.parser")
             modified_home.select_one("#files").insert_before(inserted_html)
             f.write(str(modified_home))
 
