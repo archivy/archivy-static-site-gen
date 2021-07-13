@@ -172,6 +172,7 @@ def build(overwrite, wiki_desc, wiki_name):
 
     app.config["SERVER_NAME"] = "localhost:5000"
     copytree(app.static_folder, (output_path / "static"))
+    copytree(Path(app.config["USER_DIR"]) / "images", output_path / "images")
 
     dataobj_dir = output_path / "dataobj"
     dataobj_dir.mkdir()
