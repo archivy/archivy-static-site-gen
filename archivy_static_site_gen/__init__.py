@@ -173,7 +173,6 @@ def build(overwrite, wiki_desc, wiki_name):
     app.config["SERVER_NAME"] = "localhost:5000"
     copytree(app.static_folder, (output_path / "static"))
     copytree(Path(app.config["USER_DIR"]) / "images", output_path / "images")
-
     dataobj_dir = output_path / "dataobj"
     dataobj_dir.mkdir()
     with app.test_request_context():
@@ -240,6 +239,16 @@ def build(overwrite, wiki_desc, wiki_name):
             )
 
 
+def omit_file(filepath, omit_val):
+    try:
+        curr_data = frontmatter.load(filepath)
+        curr_data["omit"] = omit_val
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(frontmatter.dumps(curr_data))
+    except:
+        click.echo(f"Preferences for {path} could not be saved.")
+
+
 @static_site.command()
 @click.argument("files", type=click.Path(), nargs=-1)
 @click.option(
@@ -251,17 +260,18 @@ def omit(files, reverse):
     """Allows you to specify filenames you'd like to ignore during the build."""
     with app.app_context():
         for path in files:
-            cur_path = Path(path)
-            if path.endswith(".md") and cur_path.resolve().is_relative_to(
+            curr_path = Path(path)
+            if curr_path.is_dir() and curr_path.resolve().is_relative_to(
                 get_data_dir()
             ):
-                try:
-                    curr_data = frontmatter.load(path)
-                    curr_data["omit"] = not reverse
-                    with open(cur_path, "w", encoding="utf-8") as f:
-                        f.write(frontmatter.dumps(curr_data))
-                except:
-                    click.echo(f"Preferences for {path} could not be saved.")
+                for filepath in curr_path.rglob("*.md"):
+                    omit_file(filepath, not reverse)
+
+            if path.endswith(".md") and curr_path.resolve().is_relative_to(
+                get_data_dir()
+            ):
+                omit_file(path, not reverse)
+
     if reverse:
         click.echo("Specified files will no longer be ignored.")
     else:
