@@ -180,7 +180,7 @@ def build(overwrite, wiki_desc, wiki_name):
         if not dataobj_tree:
             click.echo("No data found.")
             return
-        items = list(filter(display_post, get_items(structured=False)))
+        items = list(filter(display_post, get_items(structured=False, load_content=True)))
         index = create_lunr_index(items)
         with (output_path / "search-index.json").open("w") as f:
             f.write(dumps(index.serialize()))
